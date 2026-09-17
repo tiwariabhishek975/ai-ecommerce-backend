@@ -1,7 +1,9 @@
 package com.example.aiecommerce.config;
 
+import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,11 +20,33 @@ import java.util.Map;
 @Configuration
 public class KafkaConfig {
 
-    @Value("${spring.kafka.bootstrap-servers:localhost:9092}")
+    @Value("${spring.kafka.bootstrap-servers:${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}}")
     private String bootstrapServers;
 
     @Value("${spring.kafka.consumer.group-id:ecommerce-group}")
     private String groupId;
+
+    @Value("${spring.kafka.properties.security.protocol:${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}}")
+    private String securityProtocol;
+
+    @Value("${spring.kafka.properties.sasl.mechanism:${KAFKA_SASL_MECHANISM:PLAIN}}")
+    private String saslMechanism;
+
+    @Value("${spring.kafka.properties.sasl.jaas.config:${KAFKA_SASL_JAAS_CONFIG:}}")
+    private String saslJaasConfig;
+
+    /**
+     * Helper method to attach SASL/SSL properties when not running plaintext locally
+     */
+    private void applySecurityConfigs(Map<String, Object> props) {
+        if (securityProtocol != null && !"PLAINTEXT".equalsIgnoreCase(securityProtocol)) {
+            props.put(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, securityProtocol);
+            props.put(SaslConfigs.SASL_MECHANISM, saslMechanism);
+            if (saslJaasConfig != null && !saslJaasConfig.isBlank()) {
+                props.put(SaslConfigs.SASL_JAAS_CONFIG, saslJaasConfig);
+            }
+        }
+    }
 
     // --- Producer Beans ---
     @Bean
@@ -31,6 +55,9 @@ public class KafkaConfig {
         configProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         configProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         configProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+
+        applySecurityConfigs(configProps);
+
         return new DefaultKafkaProducerFactory<>(configProps);
     }
 
@@ -48,6 +75,9 @@ public class KafkaConfig {
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+
+        applySecurityConfigs(props);
+
         return new DefaultKafkaConsumerFactory<>(props);
     }
 
@@ -56,8 +86,8 @@ public class KafkaConfig {
         ConcurrentKafkaListenerContainerFactory<String, String> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory());
-        // Prevents endless connection attempts when Kafka is offline locally
-        factory.setAutoStartup(false);
+        // Enabled so the consumer actively receives events on Render
+        factory.setAutoStartup(true);
         return factory;
     }
 }
